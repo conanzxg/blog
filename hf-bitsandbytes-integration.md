@@ -1,38 +1,40 @@
 ---
-title: "使用 transformers、accelerate 和 bitsandbytes 对大规模 transformers 的 8 位矩阵乘法的简要介绍"
+title: "对大规模 transformers 模型的8位矩阵乘法的简要介绍 -- 使用 transformers、accelerate 和 bitsandbytes 库"
 thumbnail: /blog/assets/96_hf_bitsandbytes_integration/Thumbnail_blue.png
 authors:
 - user: ybelkada
 - user: timdettmers
   guest: true
+translators:
+- user: caranaZ
 ---
 
-# A Gentle Introduction to 8-bit Matrix Multiplication for transformers at scale using Hugging Face Transformers, Accelerate and bitsandbytes
+# 对大规模 transformers 模型的8位矩阵乘法的简要介绍 -- 使用 transformers、accelerate 和 bitsandbytes 库
 
 <!-- {blog_metadata} -->
 <!-- {authors} -->
 
 ![thumbnail](assets/96_hf_bitsandbytes_integration/Thumbnail_blue.png)
 
-## Introduction
+## 简介
 
-Language models are becoming larger all the time. At the time of this writing, PaLM has 540B parameters, OPT, GPT-3, and BLOOM have around 176B parameters, and we are trending towards even larger models. Below is a diagram showing the size of some recent language models.
+语言模型一直在变大。在撰写本文时，PaLM 有 540B 个参数，OPT、GPT-3 和 BLOOM 有大约 176B 个参数，而且我们正朝着更大的模型发展。下图显示了最近的一些语言模型的大小。
 
 ![LLM](assets/96_hf_bitsandbytes_integration/LLM3.png)
 
-Therefore, these models are hard to run on easily accessible devices. For example, just to do inference on BLOOM-176B, you would need to have 8x 80GB A100 GPUs (~$15k each). To fine-tune BLOOM-176B, you'd need 72 of these GPUs! Much larger models, like PaLM would require even more resources.
+因此，这些模型很难在普通的设备上运行。 例如，用 BLOOM-176B 模型做推理就需要 8 个 80GB A100 GPU（每个约 15,000 美元）。微调 BLOOM-176B 模型需要 72 个这样的 GPU！更大的模型，如 PaLM，将需要更多资源。
 
-Because these huge models require so many GPUs to run, we need to find ways to reduce these requirements while preserving the model's performance. Various technologies have been developed that try to shrink the model size, you may have heard of quantization and distillation, and there are many others.
+由于这些庞大的模型需要大量 GPU 才能运行，因此我们需要找到降低这些要求的方法，同时保持模型性能。各种试图缩小模型大小的技术应运而生，您可能听说过量化和蒸馏，还有很多其他技术。
 
-After completing the training of BLOOM-176B, we at HuggingFace and BigScience were looking for ways to make this big model easier to run on less GPUs. Through our BigScience community we were made aware of research on Int8 inference that does not degrade predictive performance of large models and reduces the memory footprint of large models by a factor or 2x. Soon we started collaboring on this research which ended with a full integration into Hugging Face `transformers`. With this blog post, we offer LLM.int8() integration for all Hugging Face models which we explain in more detail below. If you want to read more about our research, you can read our paper, [LLM.int8(): 8-bit Matrix Multiplication for Transformers at Scale](https://arxiv.org/abs/2208.07339).
+我们来自 HuggingFace 和 BigScience 团队，在完成 BLOOM-176B 的训练后，正在寻找让大模型更容易地在更少的 GPU 上运行的方法。通过 BigScience 社区，我们了解到 Int8 推理方法不会降低大型模型的预测性能，并且可以将大型模型的内存占用量减少 2 倍。(???reduces the memory footprint of large models by a factor or 2x.) 很快我们就开始合作研究这个方法，最终将其完全整合到 Hugging Face `transformers` 库中。 通过这篇博文，我们为所有 Hugging Face 模型提供了 LLM.int8() 集成，我们将在下文进行更详细的解释。 如果您想了解更多关于我们的研究，您可以阅读我们的论文，[LLM.int8(): 8-bit Matrix Multiplication for Transformers at Scale](https://arxiv.org/abs/2208.07339).
 
-This article focuses on giving a high-level overview of this quantization technology, outlining the difficulties in incorporating it into the `transformers` library, and drawing up the long-term goals of this partnership.
+本文着重于三个方面：对这种量化技术进行高层次的概述，概述将其纳入 `transformers` 库的困难，以及拟定？？？这种合作关系的长期目标。This article focuses on giving a high-level overview of this quantization technology, outlining the difficulties in incorporating it into the `transformers` library, and drawing up the long-term goals of this partnership.
 
-Here you will learn what exactly make a large model use so much memory? What makes BLOOM 350GB? Let's begin by gradually going over a few basic premises.
+在这里，您将了解究竟是什么导致一个大型模型使用这么多内存？ 为什么 BLOOM 能有 350GB 这么大？ 让我们先温习一些基本前提。Here you will learn what exactly make a large model use so much memory? What makes BLOOM 350GB? Let's begin by gradually going over a few basic premises.
 
-## Common data types used in Machine Learning
+## 机器学习中常见的数据类型
 
-We start with the basic understanding of different floating point data types, which are also referred to as "precision" in the context of Machine Learning.
+我们从理解不同的浮点数据类型开始，这些数据类型在机器学习的语境中也被称为“精度”。We start with the basic understanding of different floating point data types, which are also referred to as "precision" in the context of Machine Learning.
 
 The size of a model is determined by the number of its parameters, and their precision, typically one of float32, float16 or bfloat16 (image below from: https://blogs.nvidia.com/blog/2020/05/14/tensorfloat-32-precision-format/).
 
