@@ -1,5 +1,5 @@
 ---
-title: "A Gentle Introduction to 8-bit Matrix Multiplication for transformers at scale using transformers, accelerate and bitsandbytes"
+title: "使用 transformers、accelerate 和 bitsandbytes 对大规模 transformers 的 8 位矩阵乘法的简要介绍"
 thumbnail: /blog/assets/96_hf_bitsandbytes_integration/Thumbnail_blue.png
 authors:
 - user: ybelkada
